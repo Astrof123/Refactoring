@@ -1,4 +1,3 @@
-
 """
 Репозиторий данных
 """
@@ -40,16 +39,22 @@ class reposity:
     def receipt_key():
         return "receipt_model"
     
-
-    # TODO: Внимание! Тут можно сделать универсально
+    """
+    Получить все ключи репозитория
+    """
+    @classmethod
+    def get_all_keys(cls):
+        return [
+            cls.range_key(),
+            cls.group_key(), 
+            cls.nomenclature_key(),
+            cls.receipt_key()
+        ]
 
     """
     Инициализация
     """
     def initalize(self):
-        self.__data[ reposity.range_key() ] = []
-        self.__data[ reposity.group_key() ] = []
-        self.__data[ reposity.nomenclature_key() ] = []
-        self.__data[ reposity.receipt_key() ] = []
-    
-    
+        # Универсальная инициализация всех ключей
+        for key in self.get_all_keys():
+            self.__data[key] = []
