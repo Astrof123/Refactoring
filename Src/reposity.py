@@ -38,23 +38,13 @@ class reposity:
     @staticmethod
     def receipt_key():
         return "receipt_model"
-    
-    """
-    Получить все ключи репозитория
-    """
-    @classmethod
-    def get_all_keys(cls):
-        return [
-            cls.range_key(),
-            cls.group_key(), 
-            cls.nomenclature_key(),
-            cls.receipt_key()
-        ]
+
 
     """
     Инициализация
     """
     def initalize(self):
-        # Универсальная инициализация всех ключей
-        for key in self.get_all_keys():
-            self.__data[key] = []
+        for method_name in dir(self):
+            if method_name.endswith('_key') and hasattr(getattr(self, method_name), '__call__'):
+                key = getattr(self, method_name)()
+                self.__data[key] = []

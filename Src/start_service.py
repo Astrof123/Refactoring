@@ -52,7 +52,7 @@ class start_service:
             raise operation_exception("Не найден файл настроек!")
 
         try:
-            with open( self.__full_file_name, 'r', encoding='utf-8') as file_instance:
+            with open( self.__full_file_name, 'r', encoding="utf-8") as file_instance:
                 settings = json.load(file_instance)
 
                 if "default_receipt" in settings.keys():
@@ -63,20 +63,22 @@ class start_service:
         except:
             return False
 
-        
-    # Загрузить единицы измерений    
+    # Загрузить единицы измерений
     def __convert_items(self, data: dict, config: dict) -> bool:
         """
-        Универсальная функция для конвертации различных типов данных
+        Универсальная функция для конвертации различных типов данных в две фазы:
+        1) Сбор DTO (не создаём реальные модели, только собираем поля и id ссылок)
+        2) Создание моделей из DTO с разрешением ссылок (lookup по self.__default_receipt_items)
+
 
         Args:
             data: исходные данные
-            config: конфигурация обработки:
+            config содержит:
                 - data_key: ключ в data для получения списка элементов
                 - repo_key: ключ для сохранения в репозитории
                 - model_class: класс модели для создания
-                - fields: маппинг полей из JSON в параметры конструктора
-                - ref_fields: поля, которые являются ссылками на другие объекты
+                - fields: список полей (порядок соответствует позиционным аргументам create)
+                - ref_fields: список кортежей (attr_name, json_field_name) для ссылок
         """
         validator.validate(data, dict)
         validator.validate(config, dict)
@@ -84,42 +86,55 @@ class start_service:
         items_data = data.get(config['data_key'], [])
         repo_key = config['repo_key']
         model_class = config['model_class']
+        fields = config.get('fields', [])
+        ref_fields = config.get('ref_fields', [])
 
+        # Фаза 1: собрать DTO
+        dtos = []
         for item_data in items_data:
-            item_id = item_data.get('id', '').strip()
+            item_id = (item_data.get('id') or '').strip()
             if not item_id:
                 continue
 
-            # Подготавливаем аргументы для создания модели
-            args = []
-            for field in config.get('fields', []):
-                args.append(item_data.get(field, ''))
+            dto = {
+                'id': item_id,
+                'pos_args': [item_data.get(f, '') for f in fields],
+                # сохраняем в DTO все ref id-ы для последующего разрешения
+                'refs': {attr_name: (item_data.get(json_field) or '') for attr_name, json_field in ref_fields}
+            }
+            dtos.append(dto)
 
-            # Обрабатываем ссылочные поля
-            kwargs = {}
-            for ref_field in config.get('ref_fields', []):
-                ref_id = item_data.get(ref_field[1], '')
-                kwargs[ref_field[0]] = self.__default_receipt_items.get(ref_id)
+        # Фаза 2: создать реальные объекты, разрешив ссылки по id
+        for dto in dtos:
+            # Собираем kwargs для create: для ссылок делаем lookup в self.__default_receipt_items
+            create_kwargs = {}
+            for attr_name, ref_id in dto['refs'].items():
+                if not ref_id:
+                    create_kwargs[attr_name] = None
+                else:
+                    # lookup в глобальном словаре ранее созданных объектов
+                    create_kwargs[attr_name] = self.__default_receipt_items.get(ref_id)
+            # positional args из DTO
+            pos_args = dto['pos_args']
 
-            # Создаем объект
-            item = model_class.create(*args, **kwargs)
-            item.unique_code = item_id
-            self.__default_receipt_items.setdefault(item_id, item)
+            # Создаём модель. Если create требует определённых kwargs, мы их передаём.
+            item = model_class.create(*pos_args, **create_kwargs)
+            item.unique_code = dto['id']
+
+            # Сохраняем в локальном словаре и в репозитории
+            self.__default_receipt_items.setdefault(dto['id'], item)
             self.__repo.data[repo_key].append(item)
 
         return True
 
-
     def convert(self, data: dict) -> bool:
         validator.validate(data, dict)
 
-        # Создаем рецепт (оставляем как есть)
         cooking_time = data.get('cooking_time', '')
         portions = int(data.get('portions', 0))
         name = data.get('name', 'НЕ ИЗВЕСТНО')
         self.__default_receipt = receipt_model.create(name, cooking_time, portions)
 
-        # Шаги приготовления
         steps = data.get('steps', [])
         for step in steps:
             if step.strip():
@@ -153,7 +168,6 @@ class start_service:
         for config in conversion_configs:
             self.__convert_items(data, config)
 
-        # Остальная логика составления рецепта...
         compositions = data.get('composition', [])
         for composition in compositions:
             nomenclature_id = composition.get('nomenclature_id', '')
@@ -170,18 +184,20 @@ class start_service:
     """
     Стартовый набор данных
     """
+
     @property
     def data(self):
-        return self.__repo.data   
+        return self.__repo.data
 
     """
     Основной метод для генерации эталонных данных
     """
+
     def start(self):
         self.file_name = "settings.json"
         result = self.load()
         if result == False:
             raise operation_exception("Невозможно сформировать стартовый набор данных!")
-        
+
 
 
