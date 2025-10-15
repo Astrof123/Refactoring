@@ -1,4 +1,3 @@
-
 """
 Репозиторий данных
 """
@@ -39,17 +38,13 @@ class reposity:
     @staticmethod
     def receipt_key():
         return "receipt_model"
-    
 
-    # TODO: Внимание! Тут можно сделать универсально
 
     """
     Инициализация
     """
     def initalize(self):
-        self.__data[ reposity.range_key() ] = []
-        self.__data[ reposity.group_key() ] = []
-        self.__data[ reposity.nomenclature_key() ] = []
-        self.__data[ reposity.receipt_key() ] = []
-    
-    
+        for method_name in dir(self):
+            if method_name.endswith('_key') and hasattr(getattr(self, method_name), '__call__'):
+                key = getattr(self, method_name)()
+                self.__data[key] = []
