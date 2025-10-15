@@ -12,6 +12,8 @@ class start_service:
     # Репозиторий
     __repo: reposity = reposity()
 
+    __all_dtos = []
+
     # Рецепт по умолчанию
     __default_receipt: receipt_model
 
@@ -63,12 +65,49 @@ class start_service:
         except:
             return False
 
+    # Cобирание DTO
+    def __collect_dto(self, items_data, fields, ref_fields):
+        dtos = []
+        for item_data in items_data:
+            item_id = (item_data.get('id') or '').strip()
+            if not item_id:
+                continue
+
+            dto = {
+                'id': item_id,
+                'pos_args': [item_data.get(f, '') for f in fields],
+                'refs': {attr_name: (item_data.get(json_field) or '') for attr_name, json_field in ref_fields}
+            }
+            dtos.append(dto)
+
+        self.__all_dtos.append(dtos)
+        return dtos
+
+    # Cоздание реальных объектов, разрешая ссылки по id
+    def __creating_objects(self, dtos, model_class, repo_key):
+        for dto in dtos:
+            create_kwargs = {}
+            for attr_name, ref_id in dto['refs'].items():
+                if not ref_id:
+                    create_kwargs[attr_name] = None
+                else:
+                    create_kwargs[attr_name] = self.__default_receipt_items.get(ref_id)
+
+            pos_args = dto['pos_args']
+
+            item = model_class.create(*pos_args, **create_kwargs)
+            item.unique_code = dto['id']
+
+            self.__default_receipt_items.setdefault(dto['id'], item)
+            self.__repo.data[repo_key].append(item)
+
+
     # Загрузить единицы измерений
     def __convert_items(self, data: dict, config: dict) -> bool:
         """
         Универсальная функция для конвертации различных типов данных в две фазы:
         1) Сбор DTO (не создаём реальные модели, только собираем поля и id ссылок)
-        2) Создание моделей из DTO с разрешением ссылок (lookup по self.__default_receipt_items)
+        2) Создание моделей из DTO с разрешением ссылок
 
 
         Args:
@@ -89,41 +128,8 @@ class start_service:
         fields = config.get('fields', [])
         ref_fields = config.get('ref_fields', [])
 
-        # Фаза 1: собрать DTO
-        dtos = []
-        for item_data in items_data:
-            item_id = (item_data.get('id') or '').strip()
-            if not item_id:
-                continue
-
-            dto = {
-                'id': item_id,
-                'pos_args': [item_data.get(f, '') for f in fields],
-                # сохраняем в DTO все ref id-ы для последующего разрешения
-                'refs': {attr_name: (item_data.get(json_field) or '') for attr_name, json_field in ref_fields}
-            }
-            dtos.append(dto)
-
-        # Фаза 2: создать реальные объекты, разрешив ссылки по id
-        for dto in dtos:
-            # Собираем kwargs для create: для ссылок делаем lookup в self.__default_receipt_items
-            create_kwargs = {}
-            for attr_name, ref_id in dto['refs'].items():
-                if not ref_id:
-                    create_kwargs[attr_name] = None
-                else:
-                    # lookup в глобальном словаре ранее созданных объектов
-                    create_kwargs[attr_name] = self.__default_receipt_items.get(ref_id)
-            # positional args из DTO
-            pos_args = dto['pos_args']
-
-            # Создаём модель. Если create требует определённых kwargs, мы их передаём.
-            item = model_class.create(*pos_args, **create_kwargs)
-            item.unique_code = dto['id']
-
-            # Сохраняем в локальном словаре и в репозитории
-            self.__default_receipt_items.setdefault(dto['id'], item)
-            self.__repo.data[repo_key].append(item)
+        dtos = self.__collect_dto(items_data, fields, ref_fields)
+        self.__creating_objects(dtos, model_class, repo_key)
 
         return True
 
@@ -140,7 +146,6 @@ class start_service:
             if step.strip():
                 self.__default_receipt.steps.append(step)
 
-        # Конвертируем данные через универсальную функцию
         conversion_configs = [
             {
                 'data_key': 'ranges',
